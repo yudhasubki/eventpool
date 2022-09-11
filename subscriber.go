@@ -232,6 +232,7 @@ func NewSubscriberConfig() *SubscribeConfig {
 
 type SubscribeConfigFunc func(*SubscribeConfig)
 
+// SetMinFlight is function to set minimum workers must be spawned
 func SetMinFlight(min int) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		if min < 1 {
@@ -241,18 +242,24 @@ func SetMinFlight(min int) SubscribeConfigFunc {
 	}
 }
 
+// SetMinFlight is function to set maximum workers could be spawned
 func SetMaxFlight(max int) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.maxFlight = max
 	}
 }
 
+// SetThreshold is function to set minimum threshold value to spawn the worker
+// if reach the threshold worker will be spawned
 func SetThreshold(threshold float64) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.threshold = threshold
 	}
 }
 
+// SetPoolThreshold is function to set value on each worker to accept the message
+// if worker is fully of message, the worker will routing to another worker
+// its similar like distributed message
 func SetPoolThreshold(poolBuffer float64) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.poolBuffer = poolBuffer
