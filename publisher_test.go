@@ -26,7 +26,7 @@ func TestPublisher(t *testing.T) {
 		return nil
 	}, eventpool.SetMinFlight(2),
 		eventpool.SetMaxFlight(10),
-		eventpool.SetPoolThreshold(2),
+		eventpool.SetPoolBuffer(2),
 		eventpool.SetThreshold(40))
 	eventPool.Start()
 

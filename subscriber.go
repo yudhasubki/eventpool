@@ -82,7 +82,7 @@ func (s *Subscriber) spawner() {
 	}()
 
 	for {
-		avg := (s.Size() / s.pools.Threshold()) * 100
+		avg := (s.Size() / s.Threshold()) * 100
 		if avg >= s.config.threshold && len(s.pools) < s.config.maxFlight {
 			s.Spawn()
 		}
@@ -103,7 +103,9 @@ func (s *Subscriber) Spawn() {
 		counterCh:  s.counterCh,
 		mtx:        new(sync.RWMutex),
 	}
+	s.mtx.Lock()
 	s.pools = append(s.pools, pool)
+	s.mtx.Unlock()
 
 	go pool.Pool()
 }
@@ -112,10 +114,14 @@ func (s *Subscriber) Spawn() {
 // the limit and the are no message to be processed.
 // purpose to reduce the spawner never close / die
 func (s *Subscriber) cleanupResource() {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
 	for {
 		removed := false
 		for i, pool := range s.pools {
-			if pool.counter == 0 && len(s.pools) > s.config.minFlight && pool.idle > 2 {
+			if pool.Size() == 0 && len(s.pools) > s.config.minFlight && pool.Idle() > 2 {
+				s.pools[i].Close()
 				s.pools[i].clean <- true
 				s.pools = append(s.pools[:i], s.pools[i+1:]...)
 				removed = true
@@ -127,6 +133,17 @@ func (s *Subscriber) cleanupResource() {
 			break
 		}
 	}
+}
+
+func (s *Subscriber) Threshold() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	var total float64 = 0
+	for _, pool := range s.pools {
+		total += pool.poolBuffer
+	}
+
+	return total
 }
 
 type SubscriberPool struct {
@@ -158,25 +175,29 @@ func (s *SubscriberPool) Pool() {
 			case <-s.clean:
 				return
 			case <-ticker.C:
+				s.mtx.Lock()
 				s.idle++
+				s.mtx.Unlock()
 			case msg := <-s.message:
 				if s.idle > 0 {
 					s.idle = 0
 				}
 
+				s.increment()
 				s.processor <- msg
 			}
 		}
 	}()
 
 	for message := range s.processor {
-		s.increment()
-
 		// run the process
 		s.fn(s.id, message)
 
 		s.decrement()
 	}
+}
+
+func (s *SubscriberPool) Close() {
 	close(s.processor)
 }
 
@@ -185,6 +206,13 @@ func (s *SubscriberPool) Size() float64 {
 	defer s.mtx.RUnlock()
 
 	return s.counter
+}
+
+func (s *SubscriberPool) Idle() int {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	return s.idle
 }
 
 func (s *SubscriberPool) decrement() {
@@ -205,15 +233,6 @@ func (s *SubscriberPool) increment() {
 
 type SubscriberPools []*SubscriberPool
 
-func (ss SubscriberPools) Threshold() float64 {
-	var total float64 = 0
-	for _, s := range ss {
-		total += s.poolBuffer
-	}
-
-	return total
-}
-
 type SubscribeConfig struct {
 	minFlight  int
 	maxFlight  int
@@ -226,41 +245,34 @@ func NewSubscriberConfig() *SubscribeConfig {
 		minFlight:  2,
 		maxFlight:  3,
 		threshold:  60,
-		poolBuffer: 1,
+		poolBuffer: 2,
 	}
 }
 
 type SubscribeConfigFunc func(*SubscribeConfig)
 
-// SetMinFlight is function to set minimum workers must be spawned
 func SetMinFlight(min int) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
-		if min < 1 {
+		if min <= 1 {
 			min = 2
 		}
 		sc.minFlight = min
 	}
 }
 
-// SetMinFlight is function to set maximum workers could be spawned
 func SetMaxFlight(max int) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.maxFlight = max
 	}
 }
 
-// SetThreshold is function to set minimum threshold value to spawn the worker
-// if reach the threshold worker will be spawned
 func SetThreshold(threshold float64) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.threshold = threshold
 	}
 }
 
-// SetPoolThreshold is function to set value on each worker to accept the message
-// if worker is fully of message, the worker will routing to another worker
-// its similar like distributed message
-func SetPoolThreshold(poolBuffer float64) SubscribeConfigFunc {
+func SetPoolBuffer(poolBuffer float64) SubscribeConfigFunc {
 	return func(sc *SubscribeConfig) {
 		sc.poolBuffer = poolBuffer
 	}
