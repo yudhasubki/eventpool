@@ -12,6 +12,7 @@ This library provides a simple and efficient implementation of a local publish-s
 - Close Hooks: Register custom close hooks to execute specific cleanup tasks during the shutdown process. This ensures that essential operations are completed before the application exits.
 - Panic Recovery: Put in place a mechanism to recover from panics and prevent your application from crashing.
 - Recover Hooks: Register custom recover hooks to execute specific actions when a panic occurs. This allows you to log errors, perform cleanup tasks, or gracefully terminate the application.
+- Dead Letter Queue: Integrate a Dead Letter Queue that receives messages that have failed to be processed by subscribers through the Error Hook.
 
 ## Installation
 
