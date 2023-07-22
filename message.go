@@ -7,34 +7,34 @@ import (
 	"strings"
 )
 
-type MessageFunc func() (io.Reader, error)
+type messageFunc func() (io.Reader, error)
 
-func Send(message io.Reader) MessageFunc {
+func Send(message io.Reader) messageFunc {
 	return func() (io.Reader, error) {
 		return message, nil
 	}
 }
 
-func SendString(message string) MessageFunc {
+func SendString(message string) messageFunc {
 	return func() (io.Reader, error) {
 		return strings.NewReader(message), nil
 	}
 }
 
-func SendByte(message []byte) MessageFunc {
+func SendByte(message []byte) messageFunc {
 	return func() (io.Reader, error) {
 		return bytes.NewReader(message), nil
 	}
 }
 
-func SendJson(message interface{}) MessageFunc {
+func SendJson(message interface{}) messageFunc {
 	return func() (io.Reader, error) {
-		var buf *bytes.Buffer
-		err := json.NewEncoder(buf).Encode(message)
+		var buf bytes.Buffer
+		err := json.NewEncoder(&buf).Encode(&message)
 		if err != nil {
 			return nil, err
 		}
 
-		return buf, nil
+		return &buf, nil
 	}
 }
