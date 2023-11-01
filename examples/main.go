@@ -12,33 +12,33 @@ import (
 func main() {
 	event := eventpool.New()
 	event.Submit("order",
-		[]eventpool.EventpoolListener{
-			{
-				Name:       "send-metric",
-				Subscriber: SendMetrics,
-			},
-			{
-				Name:       "set-cache",
-				Subscriber: SetCache,
-			},
-			{
-				Name:       "set-log",
-				Subscriber: SetLog,
+		eventpool.EventpoolListener{
+			Name:       "send-metric",
+			Subscriber: SendMetrics,
+			Opts: []eventpool.SubscriberConfigFunc{
+				eventpool.RecoverHook(func(name string, job io.Reader) {
+					var buf bytes.Buffer
+
+					_, err := io.Copy(&buf, job)
+					if err != nil {
+						return
+					}
+
+					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
+				}), // if needed
+				eventpool.CloseHook(func(name string) {
+					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
+				}), // if needed
 			},
 		},
-		eventpool.RecoverHook(func(name string, job io.Reader) {
-			var buf bytes.Buffer
-
-			_, err := io.Copy(&buf, job)
-			if err != nil {
-				return
-			}
-
-			fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
-		}),
-		eventpool.CloseHook(func(name string) {
-			fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
-		}),
+		eventpool.EventpoolListener{
+			Name:       "set-cache",
+			Subscriber: SetCache,
+		},
+		eventpool.EventpoolListener{
+			Name:       "set-log",
+			Subscriber: SetLog,
+		},
 	)
 
 	event.Run()

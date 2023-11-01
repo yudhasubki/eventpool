@@ -10,6 +10,7 @@ type Eventpool struct {
 type EventpoolListener struct {
 	Name       string
 	Subscriber SubscriberFunc
+	Opts       []SubscriberConfigFunc
 }
 
 func New() *Eventpool {
@@ -20,10 +21,10 @@ func New() *Eventpool {
 }
 
 // Submit is receptionist to register topic and function to process message
-func (w *Eventpool) Submit(topic string, eventpoolListeners []EventpoolListener, opts ...SubscriberConfigFunc) {
+func (w *Eventpool) Submit(topic string, eventpoolListeners ...EventpoolListener) {
 	w.workers[topic] = make(map[string]*subscriber)
 	for _, listener := range eventpoolListeners {
-		w.workers[topic][listener.Name] = newSubscriber(listener.Name, listener.Subscriber, opts...)
+		w.workers[topic][listener.Name] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
 	}
 }
 
