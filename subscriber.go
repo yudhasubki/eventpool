@@ -18,9 +18,9 @@ type subscriberConfig struct {
 	bufferSize  int
 	maxWorkers  int
 	maxRetry    int
-	errorHook   func(job io.Reader)
-	recoverHook func()
-	closeHook   func()
+	errorHook   func(name string, job io.Reader)
+	recoverHook func(name string, job io.Reader)
+	closeHook   func(name string)
 }
 
 func BufferSize(bufferSize int) func(config *subscriberConfig) {
@@ -53,27 +53,28 @@ func MaxRetry(max int) func(config *subscriberConfig) {
 }
 
 // RecoverHook handling if receive the signal panic
-func RecoverHook(recoverHook func()) func(config *subscriberConfig) {
+func RecoverHook(recoverHook func(name string, job io.Reader)) func(config *subscriberConfig) {
 	return func(config *subscriberConfig) {
 		config.recoverHook = recoverHook
 	}
 }
 
 // CloseHook handling for close the eventpool
-func CloseHook(closeHook func()) func(config *subscriberConfig) {
+func CloseHook(closeHook func(name string)) func(config *subscriberConfig) {
 	return func(config *subscriberConfig) {
 		config.closeHook = closeHook
 	}
 }
 
 // ErrorHook handling for dead-letter queue
-func ErrorHook(errorHook func(job io.Reader)) func(config *subscriberConfig) {
+func ErrorHook(errorHook func(name string, job io.Reader)) func(config *subscriberConfig) {
 	return func(config *subscriberConfig) {
 		config.errorHook = errorHook
 	}
 }
 
 type subscriber struct {
+	name   string
 	jobs   chan io.Reader
 	fn     SubscriberFunc
 	ctx    context.Context
@@ -81,7 +82,7 @@ type subscriber struct {
 	config subscriberConfig
 }
 
-func newSubscriber(fn SubscriberFunc, opts ...SubscriberConfigFunc) *subscriber {
+func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc) *subscriber {
 	cfg := subscriberConfig{
 		maxWorkers:  10,
 		bufferSize:  100,
@@ -97,6 +98,7 @@ func newSubscriber(fn SubscriberFunc, opts ...SubscriberConfigFunc) *subscriber 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &subscriber{
+		name:   name,
 		jobs:   make(chan io.Reader, cfg.bufferSize),
 		fn:     fn,
 		ctx:    ctx,
@@ -127,7 +129,7 @@ func (s *subscriber) spawn(worker int) {
 				}
 
 				if maxRetry > s.config.maxRetry && s.config.errorHook != nil {
-					s.config.errorHook(job)
+					s.config.errorHook(s.name, job)
 				}
 			}
 		}
@@ -138,7 +140,7 @@ func (s *subscriber) process(job io.Reader) error {
 	defer func() {
 		if r := recover(); r != nil {
 			if s.config.recoverHook != nil {
-				s.config.recoverHook()
+				s.config.recoverHook(s.name, job)
 			}
 		}
 	}()
@@ -167,5 +169,5 @@ Retry:
 		return
 	}
 
-	s.config.closeHook()
+	s.config.closeHook(s.name)
 }
