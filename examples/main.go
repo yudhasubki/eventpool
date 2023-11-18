@@ -25,10 +25,10 @@ func main() {
 					}
 
 					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
-				}), // if needed
+				}),
 				eventpool.CloseHook(func(name string) {
 					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
-				}), // if needed
+				}),
 			},
 		},
 		eventpool.EventpoolListener{
@@ -40,11 +40,33 @@ func main() {
 			Subscriber: SetLog,
 		},
 	)
+	event.Submit("cart-delete",
+		eventpool.EventpoolListener{
+			Name:       "cart-delete",
+			Subscriber: CartDelete,
+		},
+		eventpool.EventpoolListener{
+			Name:       "cart-delete-counter",
+			Subscriber: CartDeleteCounter,
+		},
+	)
 
 	event.Run()
 
 	for i := 0; i < 10; i++ {
-		event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go event.Publish("cart-delete", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+	}
+	time.Sleep(5 * time.Second)
+
+	event.SubmitOnAir("order-in-the-air", eventpool.EventpoolListener{
+		Name:       "set-in-the-air",
+		Subscriber: SetWorkerInTheAir,
+	})
+
+	for i := 0; i < 10; i++ {
+		go event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go event.Publish("order-in-the-air", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
 	}
 
 	time.Sleep(5 * time.Second)
@@ -78,6 +100,45 @@ func SetLog(message io.Reader) error {
 	}
 
 	fmt.Println("[SetLog] receive message from publisher ", buf.String())
+
+	return nil
+}
+
+func SetWorkerInTheAir(message io.Reader) error {
+	var buf bytes.Buffer
+
+	_, err := io.Copy(&buf, message)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("[SetWorkerInTheAir] receive message from publisher ", buf.String())
+
+	return nil
+}
+
+func CartDelete(message io.Reader) error {
+	var buf bytes.Buffer
+
+	_, err := io.Copy(&buf, message)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("[CartDelete] receive message from publisher ", buf.String())
+
+	return nil
+}
+
+func CartDeleteCounter(message io.Reader) error {
+	var buf bytes.Buffer
+
+	_, err := io.Copy(&buf, message)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("[CartDeleteCounter] receive message from publisher ", buf.String())
 
 	return nil
 }
