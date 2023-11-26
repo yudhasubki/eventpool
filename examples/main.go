@@ -74,11 +74,11 @@ func main() {
 	time.Sleep(5 * time.Second)
 }
 
-func SendMetrics(message io.Reader) error {
+func SendMetrics(name string, message io.Reader) error {
 	panic("recover send metrics function")
 }
 
-func SetCache(message io.Reader) error {
+func SetCache(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
@@ -86,12 +86,12 @@ func SetCache(message io.Reader) error {
 		return err
 	}
 
-	fmt.Println("[SetCache] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", buf.String())
 
 	return nil
 }
 
-func SetLog(message io.Reader) error {
+func SetLog(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
@@ -99,12 +99,12 @@ func SetLog(message io.Reader) error {
 		return err
 	}
 
-	fmt.Println("[SetLog] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", buf.String())
 
 	return nil
 }
 
-func SetWorkerInTheAir(message io.Reader) error {
+func SetWorkerInTheAir(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
@@ -112,12 +112,12 @@ func SetWorkerInTheAir(message io.Reader) error {
 		return err
 	}
 
-	fmt.Println("[SetWorkerInTheAir] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", buf.String())
 
 	return nil
 }
 
-func CartDelete(message io.Reader) error {
+func CartDelete(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
@@ -125,12 +125,12 @@ func CartDelete(message io.Reader) error {
 		return err
 	}
 
-	fmt.Println("[CartDelete] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", buf.String())
 
 	return nil
 }
 
-func CartDeleteCounter(message io.Reader) error {
+func CartDeleteCounter(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
@@ -138,7 +138,7 @@ func CartDeleteCounter(message io.Reader) error {
 		return err
 	}
 
-	fmt.Println("[CartDeleteCounter] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", buf.String())
 
 	return nil
 }

@@ -10,7 +10,7 @@ const (
 	waitSleepClose = 1
 )
 
-type SubscriberFunc func(message io.Reader) error
+type SubscriberFunc func(name string, message io.Reader) error
 
 type SubscriberConfigFunc func(c *subscriberConfig)
 
@@ -121,7 +121,7 @@ func (s *subscriber) spawn(worker int) {
 		case job := <-s.jobs:
 			maxRetry := 0
 		Retry:
-			err := s.process(job) // create new func to handle panic recover
+			err := s.process(s.name, job) // create new func to handle panic recover
 			if err != nil {
 				maxRetry++
 				if maxRetry <= s.config.maxRetry {
@@ -136,7 +136,7 @@ func (s *subscriber) spawn(worker int) {
 	}
 }
 
-func (s *subscriber) process(job io.Reader) error {
+func (s *subscriber) process(name string, job io.Reader) error {
 	defer func() {
 		if r := recover(); r != nil {
 			if s.config.recoverHook != nil {
@@ -145,7 +145,7 @@ func (s *subscriber) process(job io.Reader) error {
 		}
 	}()
 
-	err := s.fn(job)
+	err := s.fn(name, job)
 	if err != nil {
 		return err
 	}
