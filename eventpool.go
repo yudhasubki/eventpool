@@ -89,6 +89,20 @@ func (w *Eventpool) Run() {
 	})
 }
 
+// Subscribers is function to get all listener name by topic name
+func (w *Eventpool) Subscribers(topic string) []string {
+	subscribers := make([]string, 0)
+
+	subs, ok := w.workers.Load(topic)
+	if ok {
+		for _, sub := range subs.(map[string]*subscriber) {
+			subscribers = append(subscribers, sub.name)
+		}
+	}
+
+	return subscribers
+}
+
 // Cap is function get total message by topic name.
 func (w *Eventpool) Cap(topic string, listenerName string) int {
 	subscribers, ok := w.workers.Load(topic)
@@ -104,6 +118,7 @@ func (w *Eventpool) Cap(topic string, listenerName string) int {
 	return 0
 }
 
+// CloseBy is function to delete topic and his subscribers.
 func (w *Eventpool) CloseBy(topic string) {
 	w.workers.Delete(topic)
 }
