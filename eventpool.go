@@ -1,11 +1,17 @@
 package eventpool
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 type Eventpool struct {
-	mu      map[string]*sync.RWMutex
-	workers map[string]map[string]*subscriber
+	workers *sync.Map
 }
+
+var (
+	ErrorTopicNotFound = errors.New("topic not found")
+)
 
 type EventpoolListener struct {
 	Name       string
@@ -15,56 +21,59 @@ type EventpoolListener struct {
 
 func New() *Eventpool {
 	return &Eventpool{
-		mu:      make(map[string]*sync.RWMutex),
-		workers: make(map[string]map[string]*subscriber),
+		workers: new(sync.Map),
 	}
 }
 
 // Submit is receptionist to register topic and function to process message
 func (w *Eventpool) Submit(topic string, eventpoolListeners ...EventpoolListener) {
-	w.workers[topic] = make(map[string]*subscriber)
-	w.mu[topic] = new(sync.RWMutex)
-
+	subscribers := make(map[string]*subscriber)
 	for _, listener := range eventpoolListeners {
-		w.workers[topic][listener.Name] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+		subscribers[listener.Name] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
 	}
+
+	w.workers.Store(topic, subscribers)
 }
 
-// SubmitOnAir is receptionist that always waiting to the new member while worker already running
-func (w *Eventpool) SubmitOnAir(topic string, eventpoolListeners ...EventpoolListener) {
-	topicWorkers, exist := w.workers[topic]
-	if exist {
-		w.mu[topic].Lock()
-		defer w.mu[topic].Unlock()
-
-		goto Register
+// SubmitOnFlight is receptionist that always waiting to the new member while worker already running
+func (w *Eventpool) SubmitOnFlight(topic string, eventpoolListeners ...EventpoolListener) {
+	subscribers, ok := w.workers.Load(topic)
+	if ok {
+		for _, listener := range eventpoolListeners {
+			if _, exist := subscribers.(map[string]*subscriber)[listener.Name]; !exist {
+				sub := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+				subscribers.(map[string]*subscriber)[listener.Name] = sub
+				sub.listen()
+			}
+		}
+		w.workers.Store(topic, subscribers)
+		return
 	}
 
-	w.workers[topic] = make(map[string]*subscriber)
-	w.mu[topic] = new(sync.RWMutex)
-
-Register:
+	tempSubscribers := make(map[string]*subscriber)
 	for _, listener := range eventpoolListeners {
-		if _, exist := topicWorkers[listener.Name]; !exist {
-			subscriber := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
-			w.workers[topic][listener.Name] = subscriber
-			subscriber.listen()
+		if _, exist := tempSubscribers[listener.Name]; !exist {
+			sub := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+			tempSubscribers[listener.Name] = sub
+			sub.listen()
 		}
 	}
+
+	w.workers.Store(topic, tempSubscribers)
 }
 
 // Publish is a mailman to publish message into the worker
 func (w *Eventpool) Publish(topic string, message messageFunc) error {
-	w.mu[topic].Lock()
-	defer w.mu[topic].Unlock()
+	subscribers, ok := w.workers.Load(topic)
+	if ok {
+		for _, listener := range subscribers.(map[string]*subscriber) {
+			msg, err := message()
+			if err != nil {
+				return err
+			}
 
-	for _, listener := range w.workers[topic] {
-		msg, err := message()
-		if err != nil {
-			return err
+			listener.jobs <- msg
 		}
-
-		listener.jobs <- msg
 	}
 
 	return nil
@@ -72,28 +81,39 @@ func (w *Eventpool) Publish(topic string, message messageFunc) error {
 
 // Run is function for spawn worker to listen their jobs.
 func (w *Eventpool) Run() {
-	for _, worker := range w.workers {
-		for _, listener := range worker {
+	w.workers.Range(func(key, value any) bool {
+		for _, listener := range value.(map[string]*subscriber) {
 			listener.listen()
 		}
-	}
+		return true
+	})
 }
 
 // Cap is function get total message by topic name.
 func (w *Eventpool) Cap(topic string, listenerName string) int {
-	listener, exist := w.workers[topic][listenerName]
-	if !exist {
-		return 0
+	subscribers, ok := w.workers.Load(topic)
+	if ok {
+		listener, exist := subscribers.(map[string]*subscriber)[listenerName]
+		if !exist {
+			return 0
+		}
+
+		return listener.cap()
 	}
 
-	return listener.cap()
+	return 0
+}
+
+func (w *Eventpool) CloseBy(topic string) {
+	w.workers.Delete(topic)
 }
 
 // Close is function to stop all the worker until the jobs get done.
 func (w *Eventpool) Close() {
-	for _, worker := range w.workers {
-		for _, listener := range worker {
+	w.workers.Range(func(key, value any) bool {
+		for _, listener := range value.(map[string]*subscriber) {
 			listener.close()
 		}
-	}
+		return true
+	})
 }

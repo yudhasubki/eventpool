@@ -59,13 +59,24 @@ func main() {
 	}
 	time.Sleep(5 * time.Second)
 
-	event.SubmitOnAir("order-in-the-air", eventpool.EventpoolListener{
+	event.SubmitOnFlight("order-in-the-air", eventpool.EventpoolListener{
 		Name:       "set-in-the-air",
 		Subscriber: SetWorkerInTheAir,
 	})
 
+	event.SubmitOnFlight("order-in-the-air", eventpool.EventpoolListener{
+		Name:       "set-in-the-air-2",
+		Subscriber: SetWorkerInTheAir,
+	})
+
+	go event.CloseBy("order")
 	for i := 0; i < 10; i++ {
-		go event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go func() {
+			err := event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+			if err != nil {
+				fmt.Println(err)
+			}
+		}()
 		go event.Publish("order-in-the-air", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
 	}
 
