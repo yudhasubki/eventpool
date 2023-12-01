@@ -11,26 +11,25 @@ import (
 
 func main() {
 	event := eventpool.New()
-	event.Submit("order",
-		eventpool.EventpoolListener{
-			Name:       "send-metric",
-			Subscriber: SendMetrics,
-			Opts: []eventpool.SubscriberConfigFunc{
-				eventpool.RecoverHook(func(name string, job io.Reader) {
-					var buf bytes.Buffer
+	event.Submit(eventpool.EventpoolListener{
+		Name:       "send-metric",
+		Subscriber: SendMetrics,
+		Opts: []eventpool.SubscriberConfigFunc{
+			eventpool.RecoverHook(func(name string, job io.Reader) {
+				var buf bytes.Buffer
 
-					_, err := io.Copy(&buf, job)
-					if err != nil {
-						return
-					}
+				_, err := io.Copy(&buf, job)
+				if err != nil {
+					return
+				}
 
-					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
-				}),
-				eventpool.CloseHook(func(name string) {
-					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
-				}),
-			},
+				fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
+			}),
+			eventpool.CloseHook(func(name string) {
+				fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
+			}),
 		},
+	},
 		eventpool.EventpoolListener{
 			Name:       "set-cache",
 			Subscriber: SetCache,
@@ -40,7 +39,7 @@ func main() {
 			Subscriber: SetLog,
 		},
 	)
-	event.Submit("cart-delete",
+	event.Submit(
 		eventpool.EventpoolListener{
 			Name:       "cart-delete",
 			Subscriber: CartDelete,
@@ -50,34 +49,36 @@ func main() {
 			Subscriber: CartDeleteCounter,
 		},
 	)
-
 	event.Run()
 
 	for i := 0; i < 10; i++ {
-		go event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
-		go event.Publish("cart-delete", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go event.Publish(eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
 	}
 	time.Sleep(5 * time.Second)
 
-	event.SubmitOnFlight("order-in-the-air", eventpool.EventpoolListener{
+	event.SubmitOnFlight(eventpool.EventpoolListener{
 		Name:       "set-in-the-air",
 		Subscriber: SetWorkerInTheAir,
 	})
 
-	event.SubmitOnFlight("order-in-the-air", eventpool.EventpoolListener{
+	event.SubmitOnFlight(eventpool.EventpoolListener{
 		Name:       "set-in-the-air-2",
 		Subscriber: SetWorkerInTheAir,
 	})
 
-	go event.CloseBy("order")
+	event.CloseBy(
+		"send-metric",
+		"set-cache",
+		"set-in-the-air",
+		"set-in-the-air-2",
+		"cart-delete-counter",
+		"cart-delete",
+	)
+
 	for i := 0; i < 10; i++ {
-		go func() {
-			err := event.Publish("order", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
-			if err != nil {
-				fmt.Println(err)
-			}
-		}()
-		go event.Publish("order-in-the-air", eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		go func(i int) {
+			event.Publish(eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		}(i)
 	}
 
 	time.Sleep(5 * time.Second)

@@ -26,65 +26,41 @@ func New() *Eventpool {
 }
 
 // Submit is receptionist to register topic and function to process message
-func (w *Eventpool) Submit(topic string, eventpoolListeners ...EventpoolListener) {
-	subscribers := make(map[string]*subscriber)
+func (w *Eventpool) Submit(eventpoolListeners ...EventpoolListener) {
 	for _, listener := range eventpoolListeners {
-		subscribers[listener.Name] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+		sub, _ := w.workers.LoadOrStore(listener.Name, newSubscriber(listener.Name, listener.Subscriber, listener.Opts...))
+		sub.(*subscriber).listen()
 	}
-
-	w.workers.Store(topic, subscribers)
 }
 
 // SubmitOnFlight is receptionist that always waiting to the new member while worker already running
-func (w *Eventpool) SubmitOnFlight(topic string, eventpoolListeners ...EventpoolListener) {
-	subscribers, ok := w.workers.Load(topic)
-	if ok {
-		for _, listener := range eventpoolListeners {
-			if _, exist := subscribers.(map[string]*subscriber)[listener.Name]; !exist {
-				sub := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
-				subscribers.(map[string]*subscriber)[listener.Name] = sub
-				sub.listen()
-			}
-		}
-		w.workers.Store(topic, subscribers)
-		return
-	}
-
-	tempSubscribers := make(map[string]*subscriber)
+func (w *Eventpool) SubmitOnFlight(eventpoolListeners ...EventpoolListener) {
 	for _, listener := range eventpoolListeners {
-		if _, exist := tempSubscribers[listener.Name]; !exist {
-			sub := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
-			tempSubscribers[listener.Name] = sub
-			sub.listen()
+		sub, loaded := w.workers.LoadOrStore(listener.Name, newSubscriber(listener.Name, listener.Subscriber, listener.Opts...))
+		if loaded {
+			continue
 		}
+		sub.(*subscriber).listen()
 	}
-
-	w.workers.Store(topic, tempSubscribers)
 }
 
 // Publish is a mailman to publish message into the worker
-func (w *Eventpool) Publish(topic string, message messageFunc) error {
-	subscribers, ok := w.workers.Load(topic)
-	if ok {
-		for _, listener := range subscribers.(map[string]*subscriber) {
-			msg, err := message()
-			if err != nil {
-				return err
-			}
-
-			listener.jobs <- msg
+func (w *Eventpool) Publish(message messageFunc) {
+	w.workers.Range(func(key, value any) bool {
+		msg, err := message()
+		if err != nil {
+			return false
 		}
-	}
+		value.(*subscriber).jobs <- msg
 
-	return nil
+		return true
+	})
 }
 
 // Run is function for spawn worker to listen their jobs.
 func (w *Eventpool) Run() {
 	w.workers.Range(func(key, value any) bool {
-		for _, listener := range value.(map[string]*subscriber) {
-			listener.listen()
-		}
+		value.(*subscriber).listen()
 		return true
 	})
 }
@@ -104,31 +80,28 @@ func (w *Eventpool) Subscribers(topic string) []string {
 }
 
 // Cap is function get total message by topic name.
-func (w *Eventpool) Cap(topic string, listenerName string) int {
-	subscribers, ok := w.workers.Load(topic)
+func (w *Eventpool) Cap(listenerName string) int {
+	sub, ok := w.workers.Load(listenerName)
 	if ok {
-		listener, exist := subscribers.(map[string]*subscriber)[listenerName]
-		if !exist {
-			return 0
-		}
-
-		return listener.cap()
+		return sub.(*subscriber).cap()
 	}
 
 	return 0
 }
 
-// CloseBy is function to delete topic and his subscribers.
-func (w *Eventpool) CloseBy(topic string) {
-	w.workers.Delete(topic)
+func (w *Eventpool) CloseBy(listenerName ...string) {
+	for _, listener := range listenerName {
+		subs, loaded := w.workers.LoadAndDelete(listener)
+		if loaded {
+			subs.(*subscriber).close()
+		}
+	}
 }
 
 // Close is function to stop all the worker until the jobs get done.
 func (w *Eventpool) Close() {
 	w.workers.Range(func(key, value any) bool {
-		for _, listener := range value.(map[string]*subscriber) {
-			listener.close()
-		}
+		value.(*subscriber).close()
 		return true
 	})
 }
