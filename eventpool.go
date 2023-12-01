@@ -66,15 +66,12 @@ func (w *Eventpool) Run() {
 }
 
 // Subscribers is function to get all listener name by topic name
-func (w *Eventpool) Subscribers(topic string) []string {
+func (w *Eventpool) Subscribers() []string {
 	subscribers := make([]string, 0)
-
-	subs, ok := w.workers.Load(topic)
-	if ok {
-		for _, sub := range subs.(map[string]*subscriber) {
-			subscribers = append(subscribers, sub.name)
-		}
-	}
+	w.workers.Range(func(key, value any) bool {
+		subscribers = append(subscribers, value.(*subscriber).name)
+		return true
+	})
 
 	return subscribers
 }
