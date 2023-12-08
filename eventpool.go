@@ -1,17 +1,12 @@
 package eventpool
 
 import (
-	"errors"
 	"sync"
 )
 
 type Eventpool struct {
 	workers *sync.Map
 }
-
-var (
-	ErrorTopicNotFound = errors.New("topic not found")
-)
 
 type EventpoolListener struct {
 	Name       string
@@ -28,8 +23,7 @@ func New() *Eventpool {
 // Submit is receptionist to register topic and function to process message
 func (w *Eventpool) Submit(eventpoolListeners ...EventpoolListener) {
 	for _, listener := range eventpoolListeners {
-		sub, _ := w.workers.LoadOrStore(listener.Name, newSubscriber(listener.Name, listener.Subscriber, listener.Opts...))
-		sub.(*subscriber).listen()
+		w.workers.Store(listener.Name, newSubscriber(listener.Name, listener.Subscriber, listener.Opts...))
 	}
 }
 
