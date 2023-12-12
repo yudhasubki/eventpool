@@ -11,42 +11,29 @@ import (
 
 func main() {
 	event := eventpool.New()
-	event.Submit(eventpool.EventpoolListener{
-		Name:       "send-metric",
-		Subscriber: SendMetrics,
-		Opts: []eventpool.SubscriberConfigFunc{
-			eventpool.RecoverHook(func(name string, job io.Reader) {
-				var buf bytes.Buffer
+	event.Submit(
+		eventpool.EventpoolListener{
+			Name:       "send-metric",
+			Subscriber: SendMetrics,
+			Opts: []eventpool.SubscriberConfigFunc{
+				eventpool.RecoverHook(func(name string, job io.Reader) {
+					var buf bytes.Buffer
 
-				_, err := io.Copy(&buf, job)
-				if err != nil {
-					return
-				}
+					_, err := io.Copy(&buf, job)
+					if err != nil {
+						return
+					}
 
-				fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
-			}),
-			eventpool.CloseHook(func(name string) {
-				fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
-			}),
+					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
+				}),
+				eventpool.CloseHook(func(name string) {
+					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
+				}),
+			},
 		},
-	},
 		eventpool.EventpoolListener{
 			Name:       "set-cache",
 			Subscriber: SetCache,
-		},
-		eventpool.EventpoolListener{
-			Name:       "set-log",
-			Subscriber: SetLog,
-		},
-	)
-	event.Submit(
-		eventpool.EventpoolListener{
-			Name:       "cart-delete",
-			Subscriber: CartDelete,
-		},
-		eventpool.EventpoolListener{
-			Name:       "cart-delete-counter",
-			Subscriber: CartDeleteCounter,
 		},
 	)
 	event.Run()
@@ -58,12 +45,7 @@ func main() {
 
 	event.SubmitOnFlight(eventpool.EventpoolListener{
 		Name:       "set-in-the-air",
-		Subscriber: SetWorkerInTheAir,
-	})
-
-	event.SubmitOnFlight(eventpool.EventpoolListener{
-		Name:       "set-in-the-air-2",
-		Subscriber: SetWorkerInTheAir,
+		Subscriber: SetWorkerOnFlight,
 	})
 
 	event.CloseBy(
@@ -103,46 +85,7 @@ func SetCache(name string, message io.Reader) error {
 	return nil
 }
 
-func SetLog(name string, message io.Reader) error {
-	var buf bytes.Buffer
-
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(name, " receive message from publisher ", buf.String())
-
-	return nil
-}
-
-func SetWorkerInTheAir(name string, message io.Reader) error {
-	var buf bytes.Buffer
-
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(name, " receive message from publisher ", buf.String())
-
-	return nil
-}
-
-func CartDelete(name string, message io.Reader) error {
-	var buf bytes.Buffer
-
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(name, " receive message from publisher ", buf.String())
-
-	return nil
-}
-
-func CartDeleteCounter(name string, message io.Reader) error {
+func SetWorkerOnFlight(name string, message io.Reader) error {
 	var buf bytes.Buffer
 
 	_, err := io.Copy(&buf, message)
