@@ -3,6 +3,7 @@ package eventpool
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -74,12 +75,14 @@ func ErrorHook(errorHook func(name string, job io.Reader)) func(config *subscrib
 }
 
 type subscriber struct {
-	name   string
-	jobs   chan io.Reader
-	fn     SubscriberFunc
-	ctx    context.Context
-	cancel context.CancelFunc
-	config subscriberConfig
+	name              string
+	jobs              chan io.Reader
+	fn                SubscriberFunc
+	ctx               context.Context
+	cancel            context.CancelFunc
+	config            subscriberConfig
+	messageProcessing int
+	mtx               *sync.Mutex
 }
 
 func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc) *subscriber {
@@ -98,12 +101,14 @@ func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &subscriber{
-		name:   name,
-		jobs:   make(chan io.Reader, cfg.bufferSize),
-		fn:     fn,
-		ctx:    ctx,
-		cancel: cancel,
-		config: cfg,
+		name:              name,
+		jobs:              make(chan io.Reader, cfg.bufferSize),
+		fn:                fn,
+		ctx:               ctx,
+		cancel:            cancel,
+		config:            cfg,
+		messageProcessing: 0,
+		mtx:               new(sync.Mutex),
 	}
 }
 
@@ -119,6 +124,10 @@ func (s *subscriber) spawn(worker int) {
 		case <-s.ctx.Done():
 			return
 		case job := <-s.jobs:
+			s.mtx.Lock()
+			s.messageProcessing++
+			s.mtx.Unlock()
+
 			maxRetry := 0
 		Retry:
 			err := s.process(s.name, job) // create new func to handle panic recover
@@ -132,6 +141,10 @@ func (s *subscriber) spawn(worker int) {
 					s.config.errorHook(s.name, job)
 				}
 			}
+
+			s.mtx.Lock()
+			s.messageProcessing--
+			s.mtx.Unlock()
 		}
 	}
 }
@@ -153,7 +166,7 @@ func (s *subscriber) process(name string, job io.Reader) error {
 }
 
 func (s *subscriber) cap() int {
-	return len(s.jobs)
+	return s.messageProcessing
 }
 
 func (s *subscriber) close() {
