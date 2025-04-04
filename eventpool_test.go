@@ -154,13 +154,13 @@ func TestParitionAddSubscriberEventOnFlightPool(t *testing.T) {
 		},
 	}
 	e := NewPartition(3)
-	e.Submit(3, listeners...)
+	e.Submit(listeners...)
 
 	assert.Equal(t, 2, len(e.Subscribers()))
 
 	e.Run()
 
-	e.SubmitOnFlight(3, EventpoolListener{
+	e.SubmitOnFlight(EventpoolListener{
 		Name: "test3",
 		Subscriber: func(name string, message []byte) error {
 			return nil
@@ -184,11 +184,11 @@ func TestCapacitySubscriberPartition(t *testing.T) {
 			},
 		},
 	}
-	e := NewPartition(10)
-	e.Submit(10, listeners...)
+	e := NewPartition(64)
+	e.Submit(listeners...)
 	e.Run()
 	for i := 0; i < messageCount; i++ {
-		e.Publish("*", "", SendString(fmt.Sprint(i)))
+		e.Publish("*", fmt.Sprint(i), SendString(fmt.Sprint(i)))
 	}
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 10, e.Cap("test1"))
@@ -213,7 +213,7 @@ func TestDeleteSubscriberPartition(t *testing.T) {
 		},
 	}
 	e := NewPartition(1)
-	e.Submit(1, listeners...)
+	e.Submit(listeners...)
 	e.Run()
 
 	assert.Equal(t, 2, len(e.Subscribers()))
@@ -232,7 +232,7 @@ func dummySubscriber(name string, r []byte) error {
 }
 
 func BenchmarkEventWildcardByPartition(b *testing.B) {
-	ep := NewPartition(3)
+	ep := NewPartition(16)
 
 	listeners := []EventpoolListener{
 		{
@@ -245,7 +245,7 @@ func BenchmarkEventWildcardByPartition(b *testing.B) {
 		},
 	}
 
-	ep.Submit(3, listeners...)
+	ep.Submit(listeners...)
 	ep.Run()
 
 	b.ResetTimer()
@@ -255,7 +255,7 @@ func BenchmarkEventWildcardByPartition(b *testing.B) {
 }
 
 func BenchmarkEventSpecificGroupByPartition(b *testing.B) {
-	ep := NewPartition(3)
+	ep := NewPartition(16)
 
 	listeners := []EventpoolListener{
 		{
@@ -268,7 +268,7 @@ func BenchmarkEventSpecificGroupByPartition(b *testing.B) {
 		},
 	}
 
-	ep.Submit(3, listeners...)
+	ep.Submit(listeners...)
 	ep.Run()
 
 	b.ResetTimer()

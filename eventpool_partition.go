@@ -10,13 +10,12 @@ import (
 type EventpoolPartition struct {
 	Partitions    Partitions
 	numPartitions int
-	mtx           sync.Mutex
 }
 
 type Partition struct {
-	workers       map[string][]*subscriber
+	workers       map[string]*subscriber
 	numPartitions int
-	messageCount  int
+	mtx           sync.Mutex
 }
 
 type Partitions []*Partition
@@ -29,63 +28,52 @@ func NewPartition(numPartitions int) *EventpoolPartition {
 	partitions := make(Partitions, numPartitions)
 	for i := 0; i < numPartitions; i++ {
 		partitions[i] = &Partition{
-			workers:       make(map[string][]*subscriber),
+			workers:       make(map[string]*subscriber),
 			numPartitions: numPartitions,
+			mtx:           sync.Mutex{},
 		}
 	}
 
 	return &EventpoolPartition{
 		numPartitions: numPartitions,
 		Partitions:    partitions,
-		mtx:           sync.Mutex{},
 	}
 }
 
-func (ep *EventpoolPartition) Submit(consumerPartition int, eventpoolListeners ...EventpoolListener) {
-	for _, listener := range eventpoolListeners {
-		consumers := make([]*subscriber, consumerPartition)
-		for j := 0; j < consumerPartition; j++ {
-			consumers[j] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
-		}
-
-		for i := 0; i < ep.numPartitions; i++ {
-			ep.mtx.Lock()
-			ep.Partitions[i].workers[listener.Name] = consumers
-			ep.mtx.Unlock()
+func (ep *EventpoolPartition) Submit(eventpoolListeners ...EventpoolListener) {
+	for i := 0; i < ep.numPartitions; i++ {
+		for _, listener := range eventpoolListeners {
+			ep.Partitions[i].mtx.Lock()
+			ep.Partitions[i].workers[listener.Name] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+			ep.Partitions[i].mtx.Unlock()
 		}
 	}
 }
 
 // SubmitOnFlight is receptionist that always waiting to the new member while worker already running
-func (ep *EventpoolPartition) SubmitOnFlight(consumerPartition int, eventpoolListeners ...EventpoolListener) {
-	for _, listener := range eventpoolListeners {
-		consumers := make([]*subscriber, consumerPartition)
-		for j := 0; j < consumerPartition; j++ {
-			consumers[j] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
-		}
+func (ep *EventpoolPartition) SubmitOnFlight(eventpoolListeners ...EventpoolListener) {
+	for i := 0; i < ep.numPartitions; i++ {
+		for _, listener := range eventpoolListeners {
+			ep.Partitions[i].mtx.Lock()
 
-		for i := 0; i < ep.numPartitions; i++ {
-			ep.mtx.Lock()
 			_, exist := ep.Partitions[i].workers[listener.Name]
 			if !exist {
-				ep.Partitions[i].workers[listener.Name] = consumers
-
-				for _, consumer := range ep.Partitions[i].workers[listener.Name] {
-					consumer.listenPartition()
-				}
+				consumer := newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+				ep.Partitions[i].workers[listener.Name] = consumer
+				consumer.listenPartition()
 			}
-			ep.mtx.Unlock()
+
+			ep.Partitions[i].mtx.Unlock()
 		}
 	}
 }
 
 func (ep *EventpoolPartition) CloseBy(listenerName ...string) {
-	ep.mtx.Lock()
-	defer ep.mtx.Unlock()
-
 	for _, listener := range listenerName {
-		for index := range ep.Partitions {
+		for index, partition := range ep.Partitions {
+			partition.mtx.Lock()
 			delete(ep.Partitions[index].workers, listener)
+			partition.mtx.Unlock()
 		}
 	}
 }
@@ -93,10 +81,8 @@ func (ep *EventpoolPartition) CloseBy(listenerName ...string) {
 // Close is function to stop all the worker until the jobs get done.
 func (ep *EventpoolPartition) Close() {
 	for index := range ep.Partitions {
-		for _, workers := range ep.Partitions[index].workers {
-			for _, worker := range workers {
-				worker.close()
-			}
+		for _, worker := range ep.Partitions[index].workers {
+			worker.close()
 		}
 	}
 }
@@ -116,27 +102,22 @@ func (ep *EventpoolPartition) Subscribers() []string {
 func (ep *EventpoolPartition) Publish(consumerGroupName string, key string, message messageFunc) {
 	// number partitions
 	num := getPartition(key, ep.numPartitions)
-
 	block := ep.Partitions[num]
-
-	// consumer partitions
-	blockNum := getPartition(key, block.numPartitions)
 
 	msg, err := message()
 	if err != nil {
 		return
 	}
-	block.messageCount++
 
 	if consumerGroupName == "" || consumerGroupName == "*" {
 		for _, consumers := range block.workers {
-			consumers[blockNum].jobs <- msg
+			consumers.jobs <- msg
 		}
 		return
 	}
 
 	if consumers, ok := block.workers[consumerGroupName]; ok {
-		consumers[blockNum].jobs <- msg
+		consumers.jobs <- msg
 	}
 }
 
@@ -151,9 +132,7 @@ func getPartition(key string, numPartition int) int {
 func (ep *EventpoolPartition) Run() {
 	for _, partition := range ep.Partitions {
 		for _, workers := range partition.workers {
-			for _, worker := range workers {
-				worker.listenPartition()
-			}
+			workers.listenPartition()
 		}
 	}
 }
@@ -161,17 +140,12 @@ func (ep *EventpoolPartition) Run() {
 // Cap is function get total message by topic name.
 func (ep *EventpoolPartition) Cap(listenerName string) int {
 	cap := 0
-	for index := range ep.Partitions {
-		workers, exist := ep.Partitions[index].workers[listenerName]
+	for _, partition := range ep.Partitions {
+		workers, exist := partition.workers[listenerName]
 		if !exist {
 			continue
 		}
-
-		for _, worker := range workers {
-			cap += worker.cap()
-		}
-
-		break
+		cap += workers.cap()
 	}
 
 	return cap

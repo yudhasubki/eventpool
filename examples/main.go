@@ -19,7 +19,7 @@ func main() {
 		},
 	}
 
-	eventPart.Submit(3, listeners...)
+	eventPart.Submit(listeners...)
 	eventPart.Run()
 }
 
