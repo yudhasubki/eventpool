@@ -16,6 +16,7 @@ type EventpoolPartition struct {
 type Partition struct {
 	workers       map[string][]*subscriber
 	numPartitions int
+	messageCount  int
 }
 
 type Partitions []*Partition
@@ -113,16 +114,19 @@ func (ep *EventpoolPartition) Subscribers() []string {
 }
 
 func (ep *EventpoolPartition) Publish(consumerGroupName string, key string, message messageFunc) {
+	// number partitions
 	num := getPartition(key, ep.numPartitions)
 
 	block := ep.Partitions[num]
 
+	// consumer partitions
 	blockNum := getPartition(key, block.numPartitions)
 
 	msg, err := message()
 	if err != nil {
 		return
 	}
+	block.messageCount++
 
 	if consumerGroupName == "" || consumerGroupName == "*" {
 		for _, consumers := range block.workers {
@@ -152,4 +156,23 @@ func (ep *EventpoolPartition) Run() {
 			}
 		}
 	}
+}
+
+// Cap is function get total message by topic name.
+func (ep *EventpoolPartition) Cap(listenerName string) int {
+	cap := 0
+	for index := range ep.Partitions {
+		workers, exist := ep.Partitions[index].workers[listenerName]
+		if !exist {
+			continue
+		}
+
+		for _, worker := range workers {
+			cap += worker.cap()
+		}
+
+		break
+	}
+
+	return cap
 }
