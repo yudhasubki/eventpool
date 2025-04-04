@@ -2,6 +2,7 @@ package eventpool
 
 import (
 	"math/rand"
+	"sync"
 
 	"github.com/zeebo/xxh3"
 )
@@ -9,6 +10,7 @@ import (
 type EventpoolPartition struct {
 	Partitions    Partitions
 	numPartitions int
+	mtx           sync.Mutex
 }
 
 type Partition struct {
@@ -34,6 +36,7 @@ func NewPartition(numPartitions int) *EventpoolPartition {
 	return &EventpoolPartition{
 		numPartitions: numPartitions,
 		Partitions:    partitions,
+		mtx:           sync.Mutex{},
 	}
 }
 
@@ -45,9 +48,68 @@ func (ep *EventpoolPartition) Submit(consumerPartition int, eventpoolListeners .
 		}
 
 		for i := 0; i < ep.numPartitions; i++ {
+			ep.mtx.Lock()
 			ep.Partitions[i].workers[listener.Name] = consumers
+			ep.mtx.Unlock()
 		}
 	}
+}
+
+// SubmitOnFlight is receptionist that always waiting to the new member while worker already running
+func (ep *EventpoolPartition) SubmitOnFlight(consumerPartition int, eventpoolListeners ...EventpoolListener) {
+	for _, listener := range eventpoolListeners {
+		consumers := make([]*subscriber, consumerPartition)
+		for j := 0; j < consumerPartition; j++ {
+			consumers[j] = newSubscriber(listener.Name, listener.Subscriber, listener.Opts...)
+		}
+
+		for i := 0; i < ep.numPartitions; i++ {
+			ep.mtx.Lock()
+			_, exist := ep.Partitions[i].workers[listener.Name]
+			if !exist {
+				ep.Partitions[i].workers[listener.Name] = consumers
+
+				for _, consumer := range ep.Partitions[i].workers[listener.Name] {
+					consumer.listenPartition()
+				}
+			}
+			ep.mtx.Unlock()
+		}
+	}
+}
+
+func (ep *EventpoolPartition) CloseBy(listenerName ...string) {
+	ep.mtx.Lock()
+	defer ep.mtx.Unlock()
+
+	for _, listener := range listenerName {
+		for index := range ep.Partitions {
+			delete(ep.Partitions[index].workers, listener)
+		}
+	}
+}
+
+// Close is function to stop all the worker until the jobs get done.
+func (ep *EventpoolPartition) Close() {
+	for index := range ep.Partitions {
+		for _, workers := range ep.Partitions[index].workers {
+			for _, worker := range workers {
+				worker.close()
+			}
+		}
+	}
+}
+
+func (ep *EventpoolPartition) Subscribers() []string {
+	subscribers := make([]string, 0)
+	for _, partition := range ep.Partitions {
+		for name := range partition.workers {
+			subscribers = append(subscribers, name)
+		}
+		break
+	}
+
+	return subscribers
 }
 
 func (ep *EventpoolPartition) Publish(consumerGroupName string, key string, message messageFunc) {
