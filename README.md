@@ -1,6 +1,20 @@
-# Eventpool
+## EventPool
 
-This library provides a simple and efficient implementation of a local publish-subscribe pattern with topics and queues using Golang channels. The publish-subscribe pattern is a widely used messaging paradigm that enables decoupling of components in an application. With this library, you can easily build event-driven systems and enable communication between different parts of your application without the components directly knowing about each other.
+This library provides a high-performance implementation of publish-subscribe pattern in Go with two distinct models:
+
+- **Broadcast Type (Pub-Sub)** - Deliver messages to all subscribers
+- **Partition Type (Queue)** - Distributed message processing with minimal contention
+
+### Partition Type Feature
+#### Smart Partitioning
+- Uses XXH3 hash algorithm for consistent message partitioning
+	- Automatic key-based partition assignment
+	- Empty keys use random distribution
+	- Hashed keys ensure consistent routing
+
+#### Concurrency Optimized
+- Partition-level isolation minimizes lock contention
+- Each partition operates independently
 
 ## Features
 - **Topic-Based Pub-Sub**: The library allows publishers to send messages to specific topics. Subscribers can then listen to those topics of interest and receive messages accordingly.
@@ -27,35 +41,106 @@ go get -u github.com/yudhasubki/eventpool
 ## Usage
 Here's a quick example of how to use the library:
 
+### Event Partition
 ```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/yudhasubki/eventpool"
+)
+
+func main() {
+	eventPart := eventpool.NewPartition(3)
+	listeners := []eventpool.EventpoolListener{
+		{
+			Name:       "groupA",
+			Subscriber: SendMetrics,
+		},
+		{
+			Name:       "groupB",
+			Subscriber: SetCache,
+		},
+	}
+
+	eventPart.Submit(3, listeners...)
+	eventPart.Run()
+}
+
+func SendMetrics(name string, message []byte) error {
+	panic("recover send metrics function")
+}
+
+func SetCache(name string, message []byte) error {
+	fmt.Println(name, " receive message from publisher ", string(message))
+
+	return nil
+}
+```
+
+### Event Broadcast
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/yudhasubki/eventpool"
+)
 
 func main() {
 	event := eventpool.New()
 	event.Submit(
 		eventpool.EventpoolListener{
-			Name:       "send-metris",
+			Name:       "send-metric",
 			Subscriber: SendMetrics,
+			Opts: []eventpool.SubscriberConfigFunc{
+				eventpool.RecoverHook(func(name string, job []byte) {
+
+					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, string(job))
+				}),
+				eventpool.CloseHook(func(name string) {
+					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
+				}),
+			},
 		},
 		eventpool.EventpoolListener{
 			Name:       "set-cache",
 			Subscriber: SetCache,
 		},
 	)
+	event.Run()
+
+	for i := 0; i < 10; i++ {
+		go event.Publish(eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+	}
+	time.Sleep(5 * time.Second)
+
+	event.CloseBy(
+		"send-metric",
+		"set-cache",
+	)
+
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			event.Publish(eventpool.SendString(fmt.Sprintf("Order ID [%d] Received ", i)))
+		}(i)
+	}
+
+	time.Sleep(5 * time.Second)
+	event.Close()
+	time.Sleep(5 * time.Second)
 }
 
-func SendMetrics(subscriberName string, message io.Reader) error {
+func SendMetrics(name string, message []byte) error {
 	panic("recover send metrics function")
 }
 
-func SetCache(subscriberName string, message io.Reader) error {
-	var buf bytes.Buffer
+func SetCache(name string, message []byte) error {
 
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("[SetCache] receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", string(message))
 
 	return nil
 }
@@ -87,20 +172,20 @@ Arch: arm64 (Apple M1)
 CPU: 8-core (4 performance + 4 efficiency)  
 Go Version: 1.21+
 
-BenchmarkEventSpecificGroupByPartition-8   6098578    208.2 ns/op    8 B/op    1 allocs/op
-BenchmarkEventWildcardByPartition-8        3115447    375.8 ns/op    8 B/op    1 allocs/op  
-BenchmarkMultipleEventByBroadcast-8        2283097    495.5 ns/op    8 B/op    1 allocs/op
-BenchmarkSingleEventByBroadcast-8          1814581    644.1 ns/op    8 B/op    1 allocs/op
+BenchmarkEventSpecificGroupByPartition-8   6710184   221.5 ns/op   8 B/op   1 allocs/op
+BenchmarkSingleEventByBroadcast-8          3252388   386.6 ns/op   8 B/op   1 allocs/op
+BenchmarkEventWildcardByPartition-8        3077424   345.2 ns/op   8 B/op   1 allocs/op  
+BenchmarkMultipleEventByBroadcast-8        2266489   457.7 ns/op   8 B/op   1 allocs/op
 ```
 
 ### 📊 Throughput Comparison
 
-| Benchmark Mode                  | Operations/sec | Latency (ns/op) | Memory (B/op) | Allocations (allocs/op) |
-|---------------------------------|----------------|-----------------|---------------|-------------------------|
-| `SpecificGroupByPartition`      | 6,098,578      | 208.2           | 8             | 1                       |
-| `WildcardByPartition`           | 3,115,447      | 375.8           | 8             | 1                       |
-| `MultipleEventBroadcast`        | 2,283,097      | 495.5           | 8             | 1                       |
-| `SingleEventBroadcast`          | 1,814,581      | 644.1           | 8             | 1                       |
+| Benchmark Mode                  | Operations/sec | Latency       | Memory | Allocs |
+|---------------------------------|----------------|---------------|--------|--------|
+| `SpecificGroupByPartition`      | **6,710,184**  | 221.5 ns/op   | 8 B    | 1      |
+| `SingleEventBroadcast`          | 3,252,388      | 386.6 ns/op   | 8 B    | 1      |
+| `WildcardByPartition`           | 3,077,424      | 345.2 ns/op   | 8 B    | 1      |
+| `MultipleEventBroadcast`        | 2,266,489      | 457.7 ns/op   | 8 B    | 1      |
 
 
 ## Contributing
