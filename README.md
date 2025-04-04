@@ -78,6 +78,31 @@ type PubSub struct {
 }
 ```
 
+## 🚀 Benchmark Performance
+
+### System Specification
+```text
+OS: darwin (macOS)  
+Arch: arm64 (Apple M1)  
+CPU: 8-core (4 performance + 4 efficiency)  
+Go Version: 1.21+
+
+BenchmarkEventSpecificGroupByPartition-8   6098578    208.2 ns/op    8 B/op    1 allocs/op
+BenchmarkEventWildcardByPartition-8        3115447    375.8 ns/op    8 B/op    1 allocs/op  
+BenchmarkMultipleEventByBroadcast-8        2283097    495.5 ns/op    8 B/op    1 allocs/op
+BenchmarkSingleEventByBroadcast-8          1814581    644.1 ns/op    8 B/op    1 allocs/op
+```
+
+### 📊 Throughput Comparison
+
+| Benchmark Mode                  | Operations/sec | Latency (ns/op) | Memory (B/op) | Allocations (allocs/op) |
+|---------------------------------|----------------|-----------------|---------------|-------------------------|
+| `SpecificGroupByPartition`      | 6,098,578      | 208.2           | 8             | 1                       |
+| `WildcardByPartition`           | 3,115,447      | 375.8           | 8             | 1                       |
+| `MultipleEventBroadcast`        | 2,283,097      | 495.5           | 8             | 1                       |
+| `SingleEventBroadcast`          | 1,814,581      | 644.1           | 8             | 1                       |
+
+
 ## Contributing
 Contributions to this library are welcome! If you find any issues, have suggestions for improvements, or want to add new features, please submit a pull request or create an issue on the GitHub repository.
 

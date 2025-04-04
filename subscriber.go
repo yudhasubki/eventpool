@@ -2,7 +2,6 @@ package eventpool
 
 import (
 	"context"
-	"io"
 	"sync"
 	"time"
 )
@@ -11,7 +10,7 @@ const (
 	waitSleepClose = 1
 )
 
-type SubscriberFunc func(name string, message io.Reader) error
+type SubscriberFunc func(name string, message []byte) error
 
 type SubscriberConfigFunc func(c *subscriberConfig)
 
@@ -19,8 +18,8 @@ type subscriberConfig struct {
 	bufferSize  int
 	maxWorkers  int
 	maxRetry    int
-	errorHook   func(name string, job io.Reader)
-	recoverHook func(name string, job io.Reader)
+	errorHook   func(name string, job []byte)
+	recoverHook func(name string, job []byte)
 	closeHook   func(name string)
 }
 
@@ -54,7 +53,7 @@ func MaxRetry(max int) func(config *subscriberConfig) {
 }
 
 // RecoverHook handling if receive the signal panic
-func RecoverHook(recoverHook func(name string, job io.Reader)) func(config *subscriberConfig) {
+func RecoverHook(recoverHook func(name string, job []byte)) func(config *subscriberConfig) {
 	return func(config *subscriberConfig) {
 		config.recoverHook = recoverHook
 	}
@@ -68,7 +67,7 @@ func CloseHook(closeHook func(name string)) func(config *subscriberConfig) {
 }
 
 // ErrorHook handling for dead-letter queue
-func ErrorHook(errorHook func(name string, job io.Reader)) func(config *subscriberConfig) {
+func ErrorHook(errorHook func(name string, job []byte)) func(config *subscriberConfig) {
 	return func(config *subscriberConfig) {
 		config.errorHook = errorHook
 	}
@@ -76,13 +75,13 @@ func ErrorHook(errorHook func(name string, job io.Reader)) func(config *subscrib
 
 type subscriber struct {
 	name              string
-	jobs              chan io.Reader
+	jobs              chan []byte
 	fn                SubscriberFunc
 	ctx               context.Context
 	cancel            context.CancelFunc
 	config            subscriberConfig
 	messageProcessing int
-	mtx               *sync.Mutex
+	mtx               sync.RWMutex
 }
 
 func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc) *subscriber {
@@ -102,14 +101,18 @@ func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc)
 
 	return &subscriber{
 		name:              name,
-		jobs:              make(chan io.Reader, cfg.bufferSize),
+		jobs:              make(chan []byte, cfg.bufferSize),
 		fn:                fn,
 		ctx:               ctx,
 		cancel:            cancel,
 		config:            cfg,
 		messageProcessing: 0,
-		mtx:               new(sync.Mutex),
+		mtx:               sync.RWMutex{},
 	}
+}
+
+func (s *subscriber) listenPartition() {
+	go s.spawn(0)
 }
 
 func (s *subscriber) listen() {
@@ -149,7 +152,7 @@ func (s *subscriber) spawn(worker int) {
 	}
 }
 
-func (s *subscriber) process(name string, job io.Reader) error {
+func (s *subscriber) process(name string, job []byte) error {
 	defer func() {
 		if r := recover(); r != nil {
 			if s.config.recoverHook != nil {
@@ -158,14 +161,13 @@ func (s *subscriber) process(name string, job io.Reader) error {
 		}
 	}()
 
-	err := s.fn(name, job)
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.fn(name, job)
 }
 
 func (s *subscriber) cap() int {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	return s.messageProcessing
 }
 

@@ -40,13 +40,13 @@ func (w *Eventpool) SubmitOnFlight(eventpoolListeners ...EventpoolListener) {
 
 // Publish is a mailman to publish message into the worker
 func (w *Eventpool) Publish(message messageFunc) {
-	w.workers.Range(func(key, value any) bool {
-		msg, err := message()
-		if err != nil {
-			return false
-		}
-		value.(*subscriber).jobs <- msg
+	msg, err := message()
+	if err != nil {
+		return
+	}
 
+	w.workers.Range(func(key, value any) bool {
+		value.(*subscriber).jobs <- msg
 		return true
 	})
 }

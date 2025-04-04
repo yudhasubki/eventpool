@@ -2,7 +2,7 @@ package eventpool
 
 import (
 	"fmt"
-	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,13 +13,13 @@ func TestAddSubscriberEventPool(t *testing.T) {
 	listeners := []EventpoolListener{
 		EventpoolListener{
 			Name: "test1",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
 		EventpoolListener{
 			Name: "test2",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
@@ -34,13 +34,13 @@ func TestAddSubscriberEventOnFlightPool(t *testing.T) {
 	listeners := []EventpoolListener{
 		EventpoolListener{
 			Name: "test1",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
 		EventpoolListener{
 			Name: "test2",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
@@ -54,7 +54,7 @@ func TestAddSubscriberEventOnFlightPool(t *testing.T) {
 
 	e.SubmitOnFlight(EventpoolListener{
 		Name: "test3",
-		Subscriber: func(name string, message io.Reader) error {
+		Subscriber: func(name string, message []byte) error {
 			return nil
 		},
 	})
@@ -65,12 +65,13 @@ func TestAddSubscriberEventOnFlightPool(t *testing.T) {
 }
 
 func TestPublishMessage(t *testing.T) {
-	var count = 0
+	var count uint64
 	listeners := []EventpoolListener{
 		EventpoolListener{
 			Name: "test1",
-			Subscriber: func(name string, message io.Reader) error {
-				count++
+			Subscriber: func(name string, message []byte) error {
+				atomic.AddUint64(&count, 1)
+
 				return nil
 			},
 		},
@@ -78,13 +79,12 @@ func TestPublishMessage(t *testing.T) {
 	e := New()
 	e.Submit(listeners...)
 	e.Run()
-
+	time.Sleep(3 * time.Second)
 	for i := 0; i < 10; i++ {
 		e.Publish(SendString(fmt.Sprint(i)))
 	}
-
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 10, count)
+	assert.Equal(t, uint64(10), atomic.LoadUint64(&count))
 }
 
 func TestCapacitySubscriber(t *testing.T) {
@@ -92,7 +92,7 @@ func TestCapacitySubscriber(t *testing.T) {
 	listeners := []EventpoolListener{
 		EventpoolListener{
 			Name: "test1",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				time.Sleep(2 * time.Second)
 
 				return nil
@@ -117,13 +117,13 @@ func TestDeleteSubscriber(t *testing.T) {
 	listeners := []EventpoolListener{
 		EventpoolListener{
 			Name: "test1",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
 		EventpoolListener{
 			Name: "test2",
-			Subscriber: func(name string, message io.Reader) error {
+			Subscriber: func(name string, message []byte) error {
 				return nil
 			},
 		},
@@ -136,4 +136,101 @@ func TestDeleteSubscriber(t *testing.T) {
 	e.CloseBy("test2")
 	assert.Equal(t, 1, len(e.Subscribers()))
 	e.Close()
+}
+
+func testMessageFunc() messageFunc {
+	return SendString("hello")
+}
+
+func dummySubscriber(name string, r []byte) error {
+
+	return nil
+}
+
+func BenchmarkEventWildcardByPartition(b *testing.B) {
+	ep := NewPartition(3)
+
+	listeners := []EventpoolListener{
+		{
+			Name:       "groupA",
+			Subscriber: dummySubscriber,
+		},
+		{
+			Name:       "groupB",
+			Subscriber: dummySubscriber,
+		},
+	}
+
+	ep.Submit(3, listeners...)
+	ep.Run()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ep.Publish("*", "", testMessageFunc())
+	}
+}
+
+func BenchmarkEventSpecificGroupByPartition(b *testing.B) {
+	ep := NewPartition(3)
+
+	listeners := []EventpoolListener{
+		{
+			Name:       "groupA",
+			Subscriber: dummySubscriber,
+		},
+		{
+			Name:       "groupB",
+			Subscriber: dummySubscriber,
+		},
+	}
+
+	ep.Submit(3, listeners...)
+	ep.Run()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ep.Publish("groupA", "", testMessageFunc())
+	}
+}
+
+func BenchmarkMultipleEventByBroadcast(b *testing.B) {
+	ep := New()
+
+	listeners := []EventpoolListener{
+		{
+			Name:       "workerA",
+			Subscriber: dummySubscriber,
+		},
+		{
+			Name:       "workerB",
+			Subscriber: dummySubscriber,
+		},
+	}
+
+	ep.SubmitOnFlight(listeners...)
+	ep.Run()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ep.Publish(testMessageFunc())
+	}
+}
+
+func BenchmarkSingleEventByBroadcast(b *testing.B) {
+	ep := New()
+
+	listeners := []EventpoolListener{
+		{
+			Name:       "workerA",
+			Subscriber: dummySubscriber,
+		},
+	}
+
+	ep.SubmitOnFlight(listeners...)
+	ep.Run()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ep.Publish(testMessageFunc())
+	}
 }

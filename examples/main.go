@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/yudhasubki/eventpool"
@@ -16,15 +14,9 @@ func main() {
 			Name:       "send-metric",
 			Subscriber: SendMetrics,
 			Opts: []eventpool.SubscriberConfigFunc{
-				eventpool.RecoverHook(func(name string, job io.Reader) {
-					var buf bytes.Buffer
+				eventpool.RecoverHook(func(name string, job []byte) {
 
-					_, err := io.Copy(&buf, job)
-					if err != nil {
-						return
-					}
-
-					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, buf.String())
+					fmt.Printf("[RecoverPanic][%s] message : %v \n", name, string(job))
 				}),
 				eventpool.CloseHook(func(name string) {
 					fmt.Printf("[Enter Gracefully Shutdown][%s]\n", name)
@@ -68,32 +60,20 @@ func main() {
 	time.Sleep(5 * time.Second)
 }
 
-func SendMetrics(name string, message io.Reader) error {
+func SendMetrics(name string, message []byte) error {
 	panic("recover send metrics function")
 }
 
-func SetCache(name string, message io.Reader) error {
-	var buf bytes.Buffer
+func SetCache(name string, message []byte) error {
 
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(name, " receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", string(message))
 
 	return nil
 }
 
-func SetWorkerOnFlight(name string, message io.Reader) error {
-	var buf bytes.Buffer
+func SetWorkerOnFlight(name string, message []byte) error {
 
-	_, err := io.Copy(&buf, message)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(name, " receive message from publisher ", buf.String())
+	fmt.Println(name, " receive message from publisher ", string(message))
 
 	return nil
 }
