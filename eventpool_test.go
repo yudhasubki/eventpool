@@ -2,6 +2,7 @@ package eventpool
 
 import (
 	"fmt"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -154,13 +155,13 @@ func TestParitionAddSubscriberEventOnFlightPool(t *testing.T) {
 		},
 	}
 	e := NewPartition(3)
-	e.Submit(listeners...)
+	e.Submit(3, listeners...)
 
 	assert.Equal(t, 2, len(e.Subscribers()))
 
 	e.Run()
 
-	e.SubmitOnFlight(EventpoolListener{
+	e.SubmitOnFlight(1, EventpoolListener{
 		Name: "test3",
 		Subscriber: func(name string, message []byte) error {
 			return nil
@@ -185,7 +186,7 @@ func TestCapacitySubscriberPartition(t *testing.T) {
 		},
 	}
 	e := NewPartition(64)
-	e.Submit(listeners...)
+	e.Submit(1, listeners...)
 	e.Run()
 	for i := 0; i < messageCount; i++ {
 		e.Publish("*", fmt.Sprint(i), SendString(fmt.Sprint(i)))
@@ -213,7 +214,7 @@ func TestDeleteSubscriberPartition(t *testing.T) {
 		},
 	}
 	e := NewPartition(1)
-	e.Submit(listeners...)
+	e.Submit(1, listeners...)
 	e.Run()
 
 	assert.Equal(t, 2, len(e.Subscribers()))
@@ -232,20 +233,26 @@ func dummySubscriber(name string, r []byte) error {
 }
 
 func BenchmarkEventWildcardByPartition(b *testing.B) {
-	ep := NewPartition(16)
+	ep := NewPartition(10)
 
 	listeners := []EventpoolListener{
 		{
 			Name:       "groupA",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+			},
 		},
 		{
 			Name:       "groupB",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+			},
 		},
 	}
 
-	ep.Submit(listeners...)
+	ep.Submit(50, listeners...)
 	ep.Run()
 
 	b.ResetTimer()
@@ -255,20 +262,26 @@ func BenchmarkEventWildcardByPartition(b *testing.B) {
 }
 
 func BenchmarkEventSpecificGroupByPartition(b *testing.B) {
-	ep := NewPartition(16)
+	ep := NewPartition(10)
 
 	listeners := []EventpoolListener{
 		{
 			Name:       "groupA",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+			},
 		},
 		{
 			Name:       "groupB",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+			},
 		},
 	}
 
-	ep.Submit(listeners...)
+	ep.Submit(50, listeners...)
 	ep.Run()
 
 	b.ResetTimer()
@@ -284,10 +297,18 @@ func BenchmarkMultipleEventByBroadcast(b *testing.B) {
 		{
 			Name:       "workerA",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+				MaxWorker(150),
+			},
 		},
 		{
 			Name:       "workerB",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+				MaxWorker(150),
+			},
 		},
 	}
 
@@ -307,6 +328,10 @@ func BenchmarkSingleEventByBroadcast(b *testing.B) {
 		{
 			Name:       "workerA",
 			Subscriber: dummySubscriber,
+			Opts: []SubscriberConfigFunc{
+				BufferSize(20000),
+				MaxWorker(150),
+			},
 		},
 	}
 
@@ -316,5 +341,61 @@ func BenchmarkSingleEventByBroadcast(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ep.Publish(testMessageFunc())
+	}
+}
+
+func dummyHandler(name string, msg []byte) error {
+	_ = name
+	_ = msg
+	return nil
+}
+
+func BenchmarkConsumerSingleEventByBroadcast(b *testing.B) {
+	sub := newSubscriber("broadcast", dummyHandler, MaxWorker(8), BufferSize(20000))
+	sub.listen()
+	defer sub.close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sub.jobs <- []byte("hello broadcast")
+	}
+}
+
+func BenchmarkConsumerMultipleEventByBroadcast(b *testing.B) {
+	sub := newSubscriber("broadcast-multi", dummyHandler, MaxWorker(8), BufferSize(20000))
+	sub.listen()
+	defer sub.close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sub.jobs <- []byte("multi hello")
+	}
+}
+
+func BenchmarkConsumerEventSpecificGroupByPartition(b *testing.B) {
+	part := NewPartitionedSubscriber("partitioned", dummyHandler, 8, BufferSize(20000))
+	defer part.Close()
+
+	for _, part := range part.partitions {
+		part.listenPartition()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		part.Submit("key"+strconv.Itoa(i), []byte("partitioned hello"))
+	}
+}
+
+func BenchmarkConsumerEventWildcardByPartition(b *testing.B) {
+	part := NewPartitionedSubscriber("partitioned-wildcard", dummyHandler, 8, BufferSize(20000))
+	defer part.Close()
+
+	for _, part := range part.partitions {
+		part.listenPartition()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		part.Submit("", []byte("random key"))
 	}
 }

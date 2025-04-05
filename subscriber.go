@@ -2,6 +2,7 @@ package eventpool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -112,16 +113,16 @@ func newSubscriber(name string, fn SubscriberFunc, opts ...SubscriberConfigFunc)
 }
 
 func (s *subscriber) listenPartition() {
-	go s.spawn(0)
+	go s.spawn()
 }
 
 func (s *subscriber) listen() {
 	for i := 0; i < s.config.maxWorkers; i++ {
-		go s.spawn(i)
+		go s.spawn()
 	}
 }
 
-func (s *subscriber) spawn(worker int) {
+func (s *subscriber) spawn() {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -185,4 +186,38 @@ Retry:
 	}
 
 	s.config.closeHook(s.name)
+}
+
+type PartitionedSubscriber struct {
+	partitions    []*subscriber
+	numPartitions int
+}
+
+func NewPartitionedSubscriber(
+	name string,
+	handler SubscriberFunc,
+	numPartitions int,
+	opts ...SubscriberConfigFunc,
+) *PartitionedSubscriber {
+	partitions := make([]*subscriber, numPartitions)
+	for i := 0; i < numPartitions; i++ {
+		sub := newSubscriber(fmt.Sprintf("%s-%d", name, i), handler, opts...)
+		partitions[i] = sub
+	}
+
+	return &PartitionedSubscriber{
+		partitions:    partitions,
+		numPartitions: numPartitions,
+	}
+}
+
+func (ps *PartitionedSubscriber) Submit(key string, data []byte) {
+	index := getPartition(key, ps.numPartitions)
+	ps.partitions[index].jobs <- data
+}
+
+func (ps *PartitionedSubscriber) Close() {
+	for _, sub := range ps.partitions {
+		sub.close()
+	}
 }
